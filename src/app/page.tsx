@@ -1,66 +1,35 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+// Root page — Landing para usuarios no autenticados, dashboard para autenticados
+import { Suspense } from 'react'
+import { redirect } from 'next/navigation'
+import { auth } from '@clerk/nextjs/server'
+import { LandingPageClient } from '@/components/LandingPageClient'
 
-export default function Home() {
+async function RootPageContent() {
+  const { userId } = await auth()
+
+  if (userId) {
+    // Usuario autenticado → ir al dashboard del residente
+    redirect('/dashboard')
+  }
+
+  // Usuario no autenticado → mostrar landing page
+  return <LandingPageClient />
+}
+
+export default function RootPage() {
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="animate-pulse space-y-4">
+            <div className="h-12 bg-slate-300 rounded w-96" />
+            <div className="h-6 bg-slate-300 rounded w-96" />
+            <div className="h-32 bg-slate-300 rounded w-96" />
+          </div>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+      }
+    >
+      <RootPageContent />
+    </Suspense>
+  )
 }

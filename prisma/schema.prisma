@@ -1,0 +1,585 @@
+// ============================================================================
+// Community Connect — Prisma Schema
+// Multi-tenant SaaS para administración de comunidades residenciales (Chile)
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+}
+
+enum Role {
+  SUPER_ADMIN
+  COMMUNITY_ADMIN
+  COMMITTEE_MEMBER
+  RESIDENT
+  CONCIERGE
+}
+
+enum UnitType {
+  APARTMENT
+  HOUSE
+  PARKING
+  STORAGE
+}
+
+enum RelationshipType {
+  OWNER
+  TENANT
+  FAMILY
+}
+
+enum TicketCategory {
+  MAINTENANCE
+  NOISE
+  WATER_LEAK
+  PARKING
+  PACKAGE
+  COMMON_EXPENSES
+  SECURITY
+  ADMINISTRATIVE
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  NEW
+  IN_REVIEW
+  IN_PROGRESS
+  WAITING_RESIDENT
+  RESOLVED
+  CLOSED
+}
+
+enum TicketSource {
+  WEB
+  WHATSAPP
+  APP
+  MANUAL
+}
+
+enum SenderType {
+  RESIDENT
+  ADMIN
+  AI
+  SYSTEM
+}
+
+enum AnnouncementType {
+  NEWS
+  MAINTENANCE
+  EMERGENCY
+  REMINDER
+  EVENT
+  IMPROVEMENT
+}
+
+enum TargetAudience {
+  ALL
+  OWNERS
+  TENANTS
+  TOWER_A
+  TOWER_B
+}
+
+enum DocumentCategory {
+  REGULATION
+  EVACUATION_PLAN
+  SCHEDULE
+  MINUTES
+  BUDGET
+  INSURANCE
+  CONTRACT
+  OTHER
+}
+
+enum UnitDocumentCategory {
+  INSURANCE
+  CONTRACT
+  IDENTITY_DOC
+  VEHICLE_DOC
+  OTHER
+}
+
+enum UnitDocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum ImprovementStatus {
+  PROPOSED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum WhatsAppDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsAppMessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum NotificationType {
+  TICKET_UPDATE
+  ANNOUNCEMENT
+  DOCUMENT_REQUEST
+  IMPROVEMENT_UPDATE
+  SYSTEM
+}
+
+// ============================================================================
+// MODELS
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// 1. COMMUNITY (Comunidad / Tenant)
+// ---------------------------------------------------------------------------
+model Community {
+  id            String   @id @default(cuid())
+  slug          String   @unique // subdominio: comunidad.communityconnect.cl
+  name          String
+  address       String
+  city          String
+  region        String
+  logoUrl       String?
+  primaryColor  String?  @default("#2563EB")
+  whatsappNumber String?
+  adminEmail    String
+  plan          Plan     @default(FREE)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  members            CommunityMember[]
+  units              Unit[]
+  tickets            Ticket[]
+  announcements      Announcement[]
+  documents          Document[]
+  unitDocuments      UnitDocument[]
+  improvements       Improvement[]
+  conciergeSchedules ConciergeSchedule[]
+  whatsappMessages   WhatsAppMessage[]
+  notifications      Notification[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("communities")
+}
+
+// ---------------------------------------------------------------------------
+// 2. USER (Usuarios)
+// ---------------------------------------------------------------------------
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique // referencia a Clerk
+  email     String   @unique
+  name      String
+  phone     String?
+  avatarUrl String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones — un user puede pertenecer a múltiples comunidades
+  communities         CommunityMember[]
+  unitResidencies     UnitResident[]
+  createdTickets      Ticket[]           @relation("TicketCreatedBy")
+  assignedTickets     Ticket[]           @relation("TicketAssignedTo")
+  ticketMessages      TicketMessage[]
+  createdAnnouncements Announcement[]
+  uploadedDocuments   Document[]         @relation("DocumentUploadedBy")
+  uploadedUnitDocs    UnitDocument[]     @relation("UnitDocUploadedBy")
+  reviewedUnitDocs    UnitDocument[]     @relation("UnitDocReviewedBy")
+  createdImprovements Improvement[]      @relation("ImprovementCreatedBy")
+  improvementUpdates  ImprovementUpdate[]
+  conciergeSchedules  ConciergeSchedule[]
+  notifications       Notification[]
+
+  @@index([clerkId])
+  @@index([email])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Tabla de unión User ↔ Community (membresía con rol por comunidad)
+// ---------------------------------------------------------------------------
+model CommunityMember {
+  id          String   @id @default(cuid())
+  userId      String
+  communityId String
+  role        Role     @default(RESIDENT)
+  isActive    Boolean  @default(true)
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId])
+  @@index([communityId])
+  @@index([userId])
+  @@map("community_members")
+}
+
+// ---------------------------------------------------------------------------
+// 3. UNIT (Unidades / Departamentos)
+// ---------------------------------------------------------------------------
+model Unit {
+  id          String   @id @default(cuid())
+  number      String   // ej: "1204"
+  floor       Int?
+  tower       String?  // torre, si aplica
+  type        UnitType @default(APARTMENT)
+  isOccupied  Boolean  @default(false)
+  communityId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  community    Community      @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  residents    UnitResident[]
+  tickets      Ticket[]
+  unitDocuments UnitDocument[]
+
+  @@unique([communityId, number])
+  @@index([communityId])
+  @@index([communityId, tower])
+  @@map("units")
+}
+
+// ---------------------------------------------------------------------------
+// 4. UNIT_RESIDENT (tabla de unión User ↔ Unit)
+// ---------------------------------------------------------------------------
+model UnitResident {
+  id               String           @id @default(cuid())
+  userId           String
+  unitId           String
+  relationshipType RelationshipType @default(OWNER)
+  isPrimary        Boolean          @default(false)
+  moveInDate       DateTime?
+  moveOutDate      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitId])
+  @@index([unitId])
+  @@index([userId])
+  @@map("unit_residents")
+}
+
+// ---------------------------------------------------------------------------
+// 5. TICKET (Requerimientos)
+// ---------------------------------------------------------------------------
+model Ticket {
+  id              String         @id @default(cuid())
+  ticketNumber    String         // ej: "TK-2024-0042"
+  title           String
+  description     String         @db.Text
+  category        TicketCategory @default(OTHER)
+  priority        TicketPriority @default(MEDIUM)
+  status          TicketStatus   @default(NEW)
+  source          TicketSource   @default(WEB)
+  aiClassified    Boolean        @default(false)
+  aiSummary       String?        @db.Text
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Foreign keys
+  communityId     String
+  unitId          String?
+  createdByUserId String
+  assignedToUserId String?
+
+  // Relaciones
+  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  unit       Unit?     @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  createdBy  User      @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignedTo User?     @relation("TicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  messages         TicketMessage[]
+  whatsappMessages WhatsAppMessage[]
+
+  @@unique([communityId, ticketNumber])
+  @@index([communityId])
+  @@index([communityId, status])
+  @@index([communityId, category])
+  @@index([createdByUserId])
+  @@index([assignedToUserId])
+  @@index([createdAt])
+  @@map("tickets")
+}
+
+// ---------------------------------------------------------------------------
+// 6. TICKET_MESSAGE (Mensajes dentro del ticket)
+// ---------------------------------------------------------------------------
+model TicketMessage {
+  id          String     @id @default(cuid())
+  ticketId    String
+  senderId    String?    // null si es sistema/IA
+  content     String     @db.Text
+  isInternal  Boolean    @default(false)
+  senderType  SenderType @default(RESIDENT)
+  attachments String[]   // array de URLs (PostgreSQL)
+  createdAt   DateTime   @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User?  @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+}
+
+// ---------------------------------------------------------------------------
+// 7. ANNOUNCEMENT (Comunicados y novedades)
+// ---------------------------------------------------------------------------
+model Announcement {
+  id              String           @id @default(cuid())
+  communityId     String
+  title           String
+  content         Json             // rich text como JSON
+  type            AnnouncementType @default(NEWS)
+  isPinned        Boolean          @default(false)
+  isPublished     Boolean          @default(false)
+  publishedAt     DateTime?
+  expiresAt       DateTime?
+  targetAudience  TargetAudience   @default(ALL)
+  attachments     String[]         // array de URLs (PostgreSQL)
+  createdByUserId String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([communityId])
+  @@index([communityId, isPublished])
+  @@index([communityId, type])
+  @@index([createdAt])
+  @@map("announcements")
+}
+
+// ---------------------------------------------------------------------------
+// 8. DOCUMENT (Documentos de la comunidad)
+// ---------------------------------------------------------------------------
+model Document {
+  id              String           @id @default(cuid())
+  communityId     String
+  name            String
+  description     String?          @db.Text
+  category        DocumentCategory @default(OTHER)
+  fileUrl         String
+  fileSize        Int              // bytes
+  mimeType        String
+  isPublic        Boolean          @default(true)
+  uploadedByUserId String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  uploadedBy User      @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([communityId])
+  @@index([communityId, category])
+  @@index([createdAt])
+  @@map("documents")
+}
+
+// ---------------------------------------------------------------------------
+// 9. UNIT_DOCUMENT (Documentos por unidad)
+// ---------------------------------------------------------------------------
+model UnitDocument {
+  id               String               @id @default(cuid())
+  unitId           String
+  communityId      String
+  name             String
+  description      String?              @db.Text
+  category         UnitDocumentCategory  @default(OTHER)
+  fileUrl          String
+  fileSize         Int                  // bytes
+  mimeType         String
+  expiresAt        DateTime?
+  status           UnitDocumentStatus   @default(PENDING)
+  uploadedByUserId String
+  reviewedByUserId String?
+  reviewNote       String?              @db.Text
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  unit       Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  uploadedBy User      @relation("UnitDocUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy User?     @relation("UnitDocReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([unitId])
+  @@index([communityId])
+  @@index([communityId, status])
+  @@index([expiresAt])
+  @@map("unit_documents")
+}
+
+// ---------------------------------------------------------------------------
+// 10. IMPROVEMENT (Mejoras y proyectos)
+// ---------------------------------------------------------------------------
+model Improvement {
+  id              String            @id @default(cuid())
+  communityId     String
+  title           String
+  description     Json              // rich text como JSON
+  status          ImprovementStatus @default(PROPOSED)
+  budget          Decimal?          @db.Decimal(12, 2)
+  actualCost      Decimal?          @db.Decimal(12, 2)
+  startDate       DateTime?
+  endDate         DateTime?
+  coverImageUrl   String?
+  createdByUserId String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  community Community           @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy User                @relation("ImprovementCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updates   ImprovementUpdate[]
+
+  @@index([communityId])
+  @@index([communityId, status])
+  @@index([createdAt])
+  @@map("improvements")
+}
+
+// ---------------------------------------------------------------------------
+// 11. IMPROVEMENT_UPDATE (Actualizaciones de mejoras)
+// ---------------------------------------------------------------------------
+model ImprovementUpdate {
+  id              String   @id @default(cuid())
+  improvementId   String
+  content         String   @db.Text
+  imageUrls       String[] // array de URLs (PostgreSQL)
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  improvement Improvement @relation(fields: [improvementId], references: [id], onDelete: Cascade)
+  createdBy   User        @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([improvementId])
+  @@index([improvementId, createdAt])
+  @@map("improvement_updates")
+}
+
+// ---------------------------------------------------------------------------
+// 12. CONCIERGE_SCHEDULE (Turnos de conserjes)
+// ---------------------------------------------------------------------------
+model ConciergeSchedule {
+  id          String    @id @default(cuid())
+  communityId String
+  userId      String    // el conserje
+  dayOfWeek   DayOfWeek
+  startTime   String    // "08:00" formato HH:mm
+  endTime     String    // "20:00" formato HH:mm
+  endsNextDay Boolean   @default(false) // true si endTime es del día siguiente (turno nocturno)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([communityId])
+  @@index([communityId, userId])
+  @@index([communityId, dayOfWeek])
+  @@map("concierge_schedules")
+}
+
+// ---------------------------------------------------------------------------
+// 13. WHATSAPP_MESSAGE (Log de mensajes WhatsApp)
+// ---------------------------------------------------------------------------
+model WhatsAppMessage {
+  id              String               @id @default(cuid())
+  communityId     String
+  fromNumber      String
+  toNumber        String
+  content         String               @db.Text
+  direction       WhatsAppDirection
+  messageId       String?              // ID de WhatsApp
+  ticketId        String?
+  status          WhatsAppMessageStatus @default(SENT)
+  isHandedToHuman Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  ticket    Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([communityId])
+  @@index([communityId, createdAt])
+  @@index([ticketId])
+  @@index([messageId])
+  @@map("whatsapp_messages")
+}
+
+// ---------------------------------------------------------------------------
+// 14. NOTIFICATION (Notificaciones)
+// ---------------------------------------------------------------------------
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  communityId String
+  title       String
+  body        String           @db.Text
+  type        NotificationType @default(SYSTEM)
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  relatedId   String?          // id del recurso relacionado
+  relatedType String?          // tipo del recurso (e.g. "TICKET", "ANNOUNCEMENT")
+  createdAt   DateTime         @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([communityId])
+  @@index([createdAt])
+  @@map("notifications")
+}
